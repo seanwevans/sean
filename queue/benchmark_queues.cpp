@@ -32,7 +32,8 @@ extern "C" {
 #if __has_include("atomic_queue/atomic_queue.h")
 #include "atomic_queue/atomic_queue.h"
 #define HAVE_ATOMIC_QUEUE 1
-#elif __has_include("third_party/atomic_queue/include/atomic_queue/atomic_queue.h")
+#elif __has_include(                                                           \
+    "third_party/atomic_queue/include/atomic_queue/atomic_queue.h")
 #include "third_party/atomic_queue/include/atomic_queue/atomic_queue.h"
 #define HAVE_ATOMIC_QUEUE 1
 #else
@@ -91,10 +92,14 @@ static BenchConfig parse_args(int argc, char **argv) {
 
 static uint64_t xor_upto(uint64_t n) {
   switch (n & 3u) {
-  case 0u: return n;
-  case 1u: return 1u;
-  case 2u: return n + 1u;
-  default: return 0u;
+  case 0u:
+    return n;
+  case 1u:
+    return 1u;
+  case 2u:
+    return n + 1u;
+  default:
+    return 0u;
   }
 }
 
@@ -102,14 +107,16 @@ static uint64_t xor_range(uint64_t first, uint64_t last) {
   return first == 0u ? xor_upto(last) : (xor_upto(last) ^ xor_upto(first - 1u));
 }
 
-static uint64_t expected_sum_for_thread(size_t thread_id, size_t items_per_producer) {
+static uint64_t expected_sum_for_thread(size_t thread_id,
+                                        size_t items_per_producer) {
   const uint64_t n = static_cast<uint64_t>(items_per_producer);
   const uint64_t first = static_cast<uint64_t>(thread_id) * n + 1u;
   const uint64_t last = first + n - 1u;
   return (n * (first + last)) / 2u;
 }
 
-static uint64_t expected_xor_for_thread(size_t thread_id, size_t items_per_producer) {
+static uint64_t expected_xor_for_thread(size_t thread_id,
+                                        size_t items_per_producer) {
   const uint64_t n = static_cast<uint64_t>(items_per_producer);
   const uint64_t first = static_cast<uint64_t>(thread_id) * n + 1u;
   const uint64_t last = first + n - 1u;
@@ -143,9 +150,7 @@ struct DVQueueAdapter final : IQueue {
   ~DVQueueAdapter() override { dvq_bench_destroy(h); }
   bool good() const { return h != nullptr; }
 
-  bool enqueue(uintptr_t value) override {
-    return dvq_bench_enqueue(h, value);
-  }
+  bool enqueue(uintptr_t value) override { return dvq_bench_enqueue(h, value); }
 
   bool dequeue(uintptr_t &value) override {
     return dvq_bench_dequeue(h, &value);
@@ -165,10 +170,10 @@ struct RigtorpAdapter final : IQueue {
 #endif
 
 #if HAVE_ATOMIC_QUEUE
-template <typename Q>
-struct AtomicQueueAdapter final : IQueue {
+template <typename Q> struct AtomicQueueAdapter final : IQueue {
   Q q;
-  explicit AtomicQueueAdapter(size_t capacity) : q(static_cast<unsigned>(capacity)) {}
+  explicit AtomicQueueAdapter(size_t capacity)
+      : q(static_cast<unsigned>(capacity)) {}
   bool enqueue(uintptr_t value) override { return q.try_push(value); }
   bool dequeue(uintptr_t &value) override { return q.try_pop(value); }
   const char *name() const override { return "atomic_queue"; }
@@ -234,8 +239,8 @@ static BenchResult run_once(IQueue &q, const BenchConfig &cfg) {
       uint64_t local_xor = 0u;
 
       for (size_t i = 0u; i < cfg.items_per_producer; ++i) {
-        const uintptr_t value =
-            static_cast<uintptr_t>(static_cast<uint64_t>(t) * cfg.items_per_producer + i + 1u);
+        const uintptr_t value = static_cast<uintptr_t>(
+            static_cast<uint64_t>(t) * cfg.items_per_producer + i + 1u);
 
         while (!q.enqueue(value))
           std::this_thread::yield();
@@ -274,26 +279,26 @@ static BenchResult run_once(IQueue &q, const BenchConfig &cfg) {
   BenchResult r;
   r.name = q.name();
   r.seconds = seconds;
-  r.ops_per_sec = seconds > 0.0 ? (2.0 * static_cast<double>(expected_total) / seconds) : 0.0;
+  r.ops_per_sec = seconds > 0.0
+                      ? (2.0 * static_cast<double>(expected_total) / seconds)
+                      : 0.0;
   r.produced_sum = producer_sum.load(std::memory_order_relaxed);
   r.consumed_sum = consumer_sum.load(std::memory_order_relaxed);
   r.produced_xor = producer_xor.load(std::memory_order_relaxed);
   r.consumed_xor = consumer_xor.load(std::memory_order_relaxed);
   r.produced_count = produced_count.load(std::memory_order_relaxed);
   r.consumed_count = consumed_count.load(std::memory_order_relaxed);
-  r.ok =
-      (r.produced_count == expected_total) &&
-      (r.consumed_count == expected_total) &&
-      (r.produced_sum == expected_sum) &&
-      (r.consumed_sum == expected_sum) &&
-      (r.produced_xor == expected_xor) &&
-      (r.consumed_xor == expected_xor);
+  r.ok = (r.produced_count == expected_total) &&
+         (r.consumed_count == expected_total) &&
+         (r.produced_sum == expected_sum) && (r.consumed_sum == expected_sum) &&
+         (r.produced_xor == expected_xor) && (r.consumed_xor == expected_xor);
 
   return r;
 }
 
 template <typename MakeQueue>
-static void bench_backend(const BenchConfig &cfg, MakeQueue make_queue, const char *name) {
+static void bench_backend(const BenchConfig &cfg, MakeQueue make_queue,
+                          const char *name) {
   std::vector<double> samples;
   samples.reserve(cfg.runs);
 
@@ -309,10 +314,11 @@ static void bench_backend(const BenchConfig &cfg, MakeQueue make_queue, const ch
     if (!last.ok) {
       std::fprintf(stderr,
                    "backend=%s run=%zu FAILED produced=%zu consumed=%zu "
-                   "psum=%" PRIu64 " csum=%" PRIu64 " pxor=%" PRIu64 " cxor=%" PRIu64 "\n",
+                   "psum=%" PRIu64 " csum=%" PRIu64 " pxor=%" PRIu64
+                   " cxor=%" PRIu64 "\n",
                    name, run, last.produced_count, last.consumed_count,
-                   last.produced_sum, last.consumed_sum,
-                   last.produced_xor, last.consumed_xor);
+                   last.produced_sum, last.consumed_sum, last.produced_xor,
+                   last.consumed_xor);
       return;
     }
 

@@ -14,7 +14,8 @@
 
 #if defined(__aarch64__)
 #define dv_cpu_relax() __asm__ volatile("yield" ::: "memory")
-#elif defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#elif defined(__x86_64__) || defined(_M_X64) || defined(__i386__) ||           \
+    defined(_M_IX86)
 #include <emmintrin.h>
 #define dv_cpu_relax() _mm_pause()
 #else
@@ -24,7 +25,8 @@
 #ifndef DV_CACHE_LINE_SIZE
 #if defined(__aarch64__)
 #define DV_CACHE_LINE_SIZE 128u
-#elif defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#elif defined(__x86_64__) || defined(_M_X64) || defined(__i386__) ||           \
+    defined(_M_IX86)
 #define DV_CACHE_LINE_SIZE 64u
 #else
 #define DV_CACHE_LINE_SIZE 32u
@@ -88,7 +90,8 @@ typedef struct {
   void *data;
 } cell_t;
 
-_Static_assert(sizeof(cell_t) <= DV_CACHE_LINE_SIZE, "cell_t exceeds cache line");
+_Static_assert(sizeof(cell_t) <= DV_CACHE_LINE_SIZE,
+               "cell_t exceeds cache line");
 
 typedef struct {
   alignas(DV_CACHE_LINE_SIZE) cell_t *buffer;
