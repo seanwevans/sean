@@ -9,8 +9,11 @@ Concurrency is achieved through sequence-gated state transitions rather than mut
 The implementation includes support for bulk enqueue and dequeue operations to maximize batch processing throughput. 
 It is heavily validated through aggressive multi-threaded smoke tests, TSAN/ASAN sanitizers, and a C++ benchmark matrix that evaluates its operations-per-second directly against standard implementations like `rigtorp` and `atomic_queue`.
 
-## Coming Soon: Graph
+## Graph
+Design document: [`graph/DESIGN.md`](graph/DESIGN.md)
 
-## Coming Soon: Heap
+## Heap
+Design document: [`heap/DESIGN.md`](heap/DESIGN.md)
 
-## Coming Soon: Stack
+## Stack
+Design document: [`stack/DESIGN.md`](stack/DESIGN.md)
