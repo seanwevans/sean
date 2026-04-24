@@ -48,9 +48,8 @@ bool mpmc_enqueue(mpmc_queue_t *q, void *data) {
   for (;;) {
     cell = &q->buffer[pos & q->buffer_mask];
     size_t seq = atomic_load_explicit(&cell->sequence, memory_order_acquire);
-    intptr_t dif = (intptr_t)seq - (intptr_t)pos;
 
-    if (dif == 0) {
+    if (seq == pos) {
       if (atomic_compare_exchange_weak_explicit(&q->head, &pos, pos + 1u,
                                                 memory_order_relaxed,
                                                 memory_order_relaxed)) {
@@ -59,7 +58,7 @@ bool mpmc_enqueue(mpmc_queue_t *q, void *data) {
         atomic_fetch_add_explicit(&q->count, 1u, memory_order_relaxed);
         return true;
       }
-    } else if (dif < 0) {
+    } else if ((pos - seq) <= q->buffer_mask) {
       return false;
     } else {
       pos = atomic_load_explicit(&q->head, memory_order_relaxed);
@@ -80,9 +79,9 @@ bool mpmc_dequeue(mpmc_queue_t *q, void **data) {
   for (;;) {
     cell = &q->buffer[pos & q->buffer_mask];
     size_t seq = atomic_load_explicit(&cell->sequence, memory_order_acquire);
-    intptr_t dif = (intptr_t)seq - (intptr_t)(pos + 1u);
+    const size_t expected = pos + 1u;
 
-    if (dif == 0) {
+    if (seq == expected) {
       if (atomic_compare_exchange_weak_explicit(&q->tail, &pos, pos + 1u,
                                                 memory_order_relaxed,
                                                 memory_order_relaxed)) {
@@ -92,7 +91,7 @@ bool mpmc_dequeue(mpmc_queue_t *q, void **data) {
         atomic_fetch_sub_explicit(&q->count, 1u, memory_order_relaxed);
         return true;
       }
-    } else if (dif < 0) {
+    } else if ((expected - seq) <= q->buffer_mask) {
       return false;
     } else {
       pos = atomic_load_explicit(&q->tail, memory_order_relaxed);
