@@ -138,8 +138,8 @@ static void pin_thread_round_robin(size_t index) {
 
 struct IQueue {
   virtual ~IQueue() = default;
-  virtual bool enqueue(uintptr_t value) = 0;
-  virtual bool dequeue(uintptr_t &value) = 0;
+  virtual bool enqueue(void *value) = 0;
+  virtual bool dequeue(void *&value) = 0;
   virtual const char *name() const = 0;
 };
 
@@ -150,9 +150,9 @@ struct DVQueueAdapter final : IQueue {
   ~DVQueueAdapter() override { dvq_bench_destroy(h); }
   bool good() const { return h != nullptr; }
 
-  bool enqueue(uintptr_t value) override { return dvq_bench_enqueue(h, value); }
+  bool enqueue(void *value) override { return dvq_bench_enqueue(h, value); }
 
-  bool dequeue(uintptr_t &value) override {
+  bool dequeue(void *&value) override {
     return dvq_bench_dequeue(h, &value);
   }
 
@@ -161,10 +161,10 @@ struct DVQueueAdapter final : IQueue {
 
 #if HAVE_RIGTORP
 struct RigtorpAdapter final : IQueue {
-  rigtorp::MPMCQueue<uintptr_t> q;
+  rigtorp::MPMCQueue<void *> q;
   explicit RigtorpAdapter(size_t capacity) : q(capacity) {}
-  bool enqueue(uintptr_t value) override { return q.try_push(value); }
-  bool dequeue(uintptr_t &value) override { return q.try_pop(value); }
+  bool enqueue(void *value) override { return q.try_push(value); }
+  bool dequeue(void *&value) override { return q.try_pop(value); }
   const char *name() const override { return "rigtorp_mpmc"; }
 };
 #endif
@@ -174,11 +174,15 @@ template <typename Q> struct AtomicQueueAdapter final : IQueue {
   Q q;
   explicit AtomicQueueAdapter(size_t capacity)
       : q(static_cast<unsigned>(capacity)) {}
-  bool enqueue(uintptr_t value) override { return q.try_push(value); }
-  bool dequeue(uintptr_t &value) override { return q.try_pop(value); }
+  bool enqueue(void *value) override { return q.try_push(value); }
+  bool dequeue(void *&value) override { return q.try_pop(value); }
   const char *name() const override { return "atomic_queue"; }
 };
 #endif
+
+struct BenchItem {
+  uint64_t value = 0u;
+};
 
 static BenchResult run_once(IQueue &q, const BenchConfig &cfg) {
   std::atomic<bool> start{false};
@@ -197,6 +201,15 @@ static BenchResult run_once(IQueue &q, const BenchConfig &cfg) {
   std::vector<std::thread> producers;
   consumers.reserve(cfg.consumers);
   producers.reserve(cfg.producers);
+  std::vector<std::vector<BenchItem>> producer_items(cfg.producers);
+
+  for (size_t t = 0u; t < cfg.producers; ++t) {
+    auto &items = producer_items[t];
+    items.resize(cfg.items_per_producer);
+    for (size_t i = 0u; i < cfg.items_per_producer; ++i)
+      items[i].value =
+          static_cast<uint64_t>(t) * cfg.items_per_producer + i + 1u;
+  }
 
   for (size_t t = 0u; t < cfg.consumers; ++t) {
     consumers.emplace_back([&, t]() {
@@ -208,10 +221,11 @@ static BenchResult run_once(IQueue &q, const BenchConfig &cfg) {
       uint64_t local_xor = 0u;
 
       for (;;) {
-        uintptr_t value = 0u;
-        if (q.dequeue(value)) {
-          local_sum += static_cast<uint64_t>(value);
-          local_xor ^= static_cast<uint64_t>(value);
+        void *payload = nullptr;
+        if (q.dequeue(payload)) {
+          const auto *item = static_cast<const BenchItem *>(payload);
+          local_sum += item->value;
+          local_xor ^= item->value;
           consumed_count.fetch_add(1u, std::memory_order_relaxed);
           continue;
         }
@@ -237,16 +251,16 @@ static BenchResult run_once(IQueue &q, const BenchConfig &cfg) {
 
       uint64_t local_sum = 0u;
       uint64_t local_xor = 0u;
+      auto &items = producer_items[t];
 
       for (size_t i = 0u; i < cfg.items_per_producer; ++i) {
-        const uintptr_t value = static_cast<uintptr_t>(
-            static_cast<uint64_t>(t) * cfg.items_per_producer + i + 1u);
+        BenchItem *item = &items[i];
 
-        while (!q.enqueue(value))
+        while (!q.enqueue(item))
           std::this_thread::yield();
 
-        local_sum += static_cast<uint64_t>(value);
-        local_xor ^= static_cast<uint64_t>(value);
+        local_sum += item->value;
+        local_xor ^= item->value;
         produced_count.fetch_add(1u, std::memory_order_relaxed);
       }
 
@@ -380,7 +394,7 @@ int main(int argc, char **argv) {
   bench_backend(
       cfg,
       [&]() -> std::unique_ptr<IQueue> {
-        using Q = atomic_queue::AtomicQueueB2<uintptr_t>;
+        using Q = atomic_queue::AtomicQueueB2<void *>;
         return std::make_unique<AtomicQueueAdapter<Q>>(cfg.capacity);
       },
       "atomic_queue");

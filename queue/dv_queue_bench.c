@@ -28,20 +28,17 @@ void dvq_bench_destroy(dvq_bench_handle *h) {
   dv_aligned_free(h);
 }
 
-bool dvq_bench_enqueue(dvq_bench_handle *h, uintptr_t value) {
+bool dvq_bench_enqueue(dvq_bench_handle *h, void *value) {
   if (!h)
     return false;
-  return mpmc_enqueue(h->q, (void *)value);
+  return mpmc_enqueue(h->q, value);
 }
 
-bool dvq_bench_dequeue(dvq_bench_handle *h, uintptr_t *value) {
+bool dvq_bench_dequeue(dvq_bench_handle *h, void **value) {
   if (!h || !value)
     return false;
 
-  void *out = NULL;
-  if (!mpmc_dequeue(h->q, &out))
+  if (!mpmc_dequeue(h->q, value))
     return false;
-
-  *value = (uintptr_t)out;
   return true;
 }

@@ -13,8 +13,8 @@ typedef struct dvq_bench_handle dvq_bench_handle;
 
 dvq_bench_handle *dvq_bench_create(size_t capacity);
 void dvq_bench_destroy(dvq_bench_handle *h);
-bool dvq_bench_enqueue(dvq_bench_handle *h, uintptr_t value);
-bool dvq_bench_dequeue(dvq_bench_handle *h, uintptr_t *value);
+bool dvq_bench_enqueue(dvq_bench_handle *h, void *value);
+bool dvq_bench_dequeue(dvq_bench_handle *h, void **value);
 
 #ifdef __cplusplus
 }

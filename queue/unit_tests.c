@@ -49,6 +49,21 @@
     }                                                                          \
   } while (0)
 
+#define ASSERT_PTR_U64_EQ(ptr, expected)                                       \
+  do {                                                                         \
+    const uint64_t *_p = (const uint64_t *)(ptr);                              \
+    const uint64_t _e = (uint64_t)(expected);                                  \
+    if (!_p || *_p != _e) {                                                    \
+      fprintf(stderr,                                                           \
+              "ASSERT_PTR_U64_EQ failed: %s value != %s (got=%llu "            \
+              "expected=%llu ptr=%p) (%s:%d)\n",                               \
+              #ptr, #expected,                                                  \
+              (unsigned long long)(_p ? *_p : 0u), (unsigned long long)_e,     \
+              (void *)_p, __FILE__, __LINE__);                                 \
+      return false;                                                             \
+    }                                                                          \
+  } while (0)
+
 typedef bool (*test_fn)(void);
 
 typedef struct {
@@ -74,10 +89,11 @@ static bool test_init_rejects_bad_sizes(void) {
 }
 
 static bool test_size_empty_and_null_handling(void) {
+  uint64_t value = 123u;
   void *out = (void *)0x1;
 
   ASSERT_EQ_U64(mpmc_size(NULL), 0u);
-  ASSERT_FALSE(mpmc_enqueue(NULL, (void *)(uintptr_t)123u));
+  ASSERT_FALSE(mpmc_enqueue(NULL, &value));
   ASSERT_FALSE(mpmc_dequeue(NULL, &out));
   ASSERT_FALSE(mpmc_dequeue(NULL, NULL));
   ASSERT_FALSE(mpmc_dequeue((mpmc_queue_t *)0x1, NULL));
@@ -100,7 +116,8 @@ static bool test_single_enqueue_dequeue(void) {
   mpmc_queue_t *q = mpmc_init(TEST_QUEUE_SIZE);
   ASSERT_TRUE(q != NULL);
 
-  void *in = (void *)(uintptr_t)0x1234u;
+  uint64_t fixture = 0x1234u;
+  void *in = &fixture;
   void *out = NULL;
 
   ASSERT_TRUE(mpmc_enqueue(q, in));
@@ -121,15 +138,16 @@ static bool test_single_enqueue_dequeue(void) {
 static bool test_fifo_order_small(void) {
   mpmc_queue_t *q = mpmc_init(TEST_QUEUE_SIZE);
   ASSERT_TRUE(q != NULL);
+  uint64_t fixtures[4] = {1u, 2u, 3u, 4u};
 
-  for (uintptr_t i = 1u; i <= 4u; ++i) {
-    ASSERT_TRUE(mpmc_enqueue(q, (void *)i));
+  for (size_t i = 0u; i < 4u; ++i) {
+    ASSERT_TRUE(mpmc_enqueue(q, &fixtures[i]));
   }
 
-  for (uintptr_t i = 1u; i <= 4u; ++i) {
+  for (uintptr_t i = 0u; i < 4u; ++i) {
     void *out = NULL;
     ASSERT_TRUE(mpmc_dequeue(q, &out));
-    ASSERT_PTR_EQ(out, (void *)i);
+    ASSERT_PTR_U64_EQ(out, i + 1u);
   }
 
   ASSERT_EQ_U64(mpmc_size(q), 0u);
@@ -140,18 +158,21 @@ static bool test_fifo_order_small(void) {
 static bool test_queue_full_and_empty_boundaries(void) {
   mpmc_queue_t *q = mpmc_init(TEST_QUEUE_SIZE);
   ASSERT_TRUE(q != NULL);
+  uint64_t fixtures[TEST_QUEUE_SIZE + 1u];
+  for (size_t i = 0u; i < TEST_QUEUE_SIZE + 1u; ++i)
+    fixtures[i] = (uint64_t)(i + 1u);
 
   for (uintptr_t i = 0u; i < TEST_QUEUE_SIZE; ++i) {
-    ASSERT_TRUE(mpmc_enqueue(q, (void *)(i + 1u)));
+    ASSERT_TRUE(mpmc_enqueue(q, &fixtures[i]));
   }
 
   ASSERT_EQ_U64(mpmc_size(q), TEST_QUEUE_SIZE);
-  ASSERT_FALSE(mpmc_enqueue(q, (void *)(uintptr_t)999u));
+  ASSERT_FALSE(mpmc_enqueue(q, &fixtures[TEST_QUEUE_SIZE]));
 
   for (uintptr_t i = 0u; i < TEST_QUEUE_SIZE; ++i) {
     void *out = NULL;
     ASSERT_TRUE(mpmc_dequeue(q, &out));
-    ASSERT_PTR_EQ(out, (void *)(i + 1u));
+    ASSERT_PTR_U64_EQ(out, i + 1u);
   }
 
   ASSERT_EQ_U64(mpmc_size(q), 0u);
@@ -167,18 +188,24 @@ static bool test_queue_full_and_empty_boundaries(void) {
 static bool test_wraparound_behavior(void) {
   mpmc_queue_t *q = mpmc_init(TEST_QUEUE_SIZE);
   ASSERT_TRUE(q != NULL);
+  uint64_t fixtures[32u * TEST_QUEUE_SIZE];
 
   for (uintptr_t round = 0u; round < 32u; ++round) {
     for (uintptr_t i = 0u; i < TEST_QUEUE_SIZE; ++i) {
-      const uintptr_t value = round * 100u + i + 1u;
-      ASSERT_TRUE(mpmc_enqueue(q, (void *)value));
+      fixtures[(round * TEST_QUEUE_SIZE) + i] = (round * 100u) + i + 1u;
+    }
+  }
+
+  for (uintptr_t round = 0u; round < 32u; ++round) {
+    for (uintptr_t i = 0u; i < TEST_QUEUE_SIZE; ++i) {
+      ASSERT_TRUE(mpmc_enqueue(q, &fixtures[(round * TEST_QUEUE_SIZE) + i]));
     }
 
     for (uintptr_t i = 0u; i < TEST_QUEUE_SIZE; ++i) {
       const uintptr_t expected = round * 100u + i + 1u;
       void *out = NULL;
       ASSERT_TRUE(mpmc_dequeue(q, &out));
-      ASSERT_PTR_EQ(out, (void *)expected);
+      ASSERT_PTR_U64_EQ(out, expected);
     }
 
     ASSERT_EQ_U64(mpmc_size(q), 0u);
@@ -192,9 +219,12 @@ static bool test_enqueue_bulk_partial_on_full(void) {
   mpmc_queue_t *q = mpmc_init(TEST_QUEUE_SIZE);
   ASSERT_TRUE(q != NULL);
 
+  uint64_t fixtures[12];
   void *items[12];
-  for (uintptr_t i = 0u; i < 12u; ++i)
-    items[i] = (void *)(i + 1u);
+  for (uintptr_t i = 0u; i < 12u; ++i) {
+    fixtures[i] = i + 1u;
+    items[i] = &fixtures[i];
+  }
 
   const size_t pushed = mpmc_enqueue_bulk(q, items, 12u);
   ASSERT_EQ_U64(pushed, TEST_QUEUE_SIZE);
@@ -203,7 +233,7 @@ static bool test_enqueue_bulk_partial_on_full(void) {
   for (uintptr_t i = 0u; i < TEST_QUEUE_SIZE; ++i) {
     void *out = NULL;
     ASSERT_TRUE(mpmc_dequeue(q, &out));
-    ASSERT_PTR_EQ(out, (void *)(i + 1u));
+    ASSERT_PTR_U64_EQ(out, i + 1u);
   }
 
   mpmc_free(q);
@@ -213,9 +243,10 @@ static bool test_enqueue_bulk_partial_on_full(void) {
 static bool test_dequeue_bulk_partial_on_empty(void) {
   mpmc_queue_t *q = mpmc_init(TEST_QUEUE_SIZE);
   ASSERT_TRUE(q != NULL);
+  uint64_t fixtures[3] = {10u, 11u, 12u};
 
   for (uintptr_t i = 0u; i < 3u; ++i) {
-    ASSERT_TRUE(mpmc_enqueue(q, (void *)(i + 10u)));
+    ASSERT_TRUE(mpmc_enqueue(q, &fixtures[i]));
   }
 
   void *items[8];
@@ -223,9 +254,9 @@ static bool test_dequeue_bulk_partial_on_empty(void) {
 
   const size_t popped = mpmc_dequeue_bulk(q, items, 8u);
   ASSERT_EQ_U64(popped, 3u);
-  ASSERT_PTR_EQ(items[0], (void *)10u);
-  ASSERT_PTR_EQ(items[1], (void *)11u);
-  ASSERT_PTR_EQ(items[2], (void *)12u);
+  ASSERT_PTR_U64_EQ(items[0], 10u);
+  ASSERT_PTR_U64_EQ(items[1], 11u);
+  ASSERT_PTR_U64_EQ(items[2], 12u);
   ASSERT_EQ_U64(mpmc_size(q), 0u);
 
   mpmc_free(q);
@@ -236,7 +267,8 @@ static bool test_bulk_zero_count_is_noop(void) {
   mpmc_queue_t *q = mpmc_init(TEST_QUEUE_SIZE);
   ASSERT_TRUE(q != NULL);
 
-  void *items[2] = {(void *)1u, (void *)2u};
+  uint64_t fixtures[2] = {1u, 2u};
+  void *items[2] = {&fixtures[0], &fixtures[1]};
 
   ASSERT_EQ_U64(mpmc_enqueue_bulk(q, items, 0u), 0u);
   ASSERT_EQ_U64(mpmc_dequeue_bulk(q, items, 0u), 0u);
@@ -264,8 +296,14 @@ static void *smoke_producer(void *arg) {
   for (size_t i = 0u; i < SMOKE_ITEMS_PER_THREAD; ++i) {
     const uint64_t value =
         ((uint64_t)a->thread_id * (uint64_t)SMOKE_ITEMS_PER_THREAD) + i + 1u;
+    uint64_t *value_obj = (uint64_t *)malloc(sizeof(*value_obj));
+    if (!value_obj) {
+      fprintf(stderr, "malloc failed in smoke_producer\n");
+      abort();
+    }
+    *value_obj = value;
 
-    while (!mpmc_enqueue(a->q, (void *)(uintptr_t)value))
+    while (!mpmc_enqueue(a->q, value_obj))
       dv_cpu_relax();
 
     local_sum += value;
@@ -284,7 +322,9 @@ static void *smoke_consumer(void *arg) {
   for (;;) {
     void *out = NULL;
     if (mpmc_dequeue(a->q, &out)) {
-      local_sum += (uint64_t)(uintptr_t)out;
+      uint64_t *value_obj = (uint64_t *)out;
+      local_sum += *value_obj;
+      free(value_obj);
       atomic_fetch_add_explicit(&smoke_cons_count, 1u, memory_order_relaxed);
       continue;
     }
