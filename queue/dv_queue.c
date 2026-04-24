@@ -6,8 +6,12 @@ mpmc_queue_t *mpmc_init(size_t buffer_size) {
   if (buffer_size < 2u || (buffer_size & (buffer_size - 1u)) != 0u)
     return NULL;
 
+  size_t q_size = 0u;
+  if (!dv_align_up_size(sizeof(mpmc_queue_t), DV_CACHE_LINE_SIZE, &q_size))
+    return NULL;
+
   mpmc_queue_t *q =
-      (mpmc_queue_t *)ALIGNED_ALLOC(DV_CACHE_LINE_SIZE, sizeof(mpmc_queue_t));
+      (mpmc_queue_t *)ALIGNED_ALLOC(DV_CACHE_LINE_SIZE, q_size);
   if (!q)
     return NULL;
 
@@ -16,8 +20,14 @@ mpmc_queue_t *mpmc_init(size_t buffer_size) {
     return NULL;
   }
 
-  void *raw_buffer =
-      ALIGNED_ALLOC(DV_CACHE_LINE_SIZE, sizeof(cell_t) * buffer_size);
+  size_t cells_size = sizeof(cell_t) * buffer_size;
+  size_t buf_size = 0u;
+  if (!dv_align_up_size(cells_size, DV_CACHE_LINE_SIZE, &buf_size)) {
+    ALIGNED_FREE(q);
+    return NULL;
+  }
+
+  void *raw_buffer = ALIGNED_ALLOC(DV_CACHE_LINE_SIZE, buf_size);
   if (!raw_buffer) {
     ALIGNED_FREE(q);
     return NULL;
