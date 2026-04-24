@@ -246,6 +246,59 @@ static bool test_bulk_zero_count_is_noop(void) {
   return true;
 }
 
+static void seed_full_queue_state(mpmc_queue_t *q, size_t tail_start) {
+  const size_t capacity = q->buffer_mask + 1u;
+  const size_t head_start = tail_start + capacity;
+
+  atomic_store_explicit(&q->tail, tail_start, memory_order_relaxed);
+  atomic_store_explicit(&q->head, head_start, memory_order_relaxed);
+  atomic_store_explicit(&q->count, capacity, memory_order_relaxed);
+
+  for (size_t i = 0u; i < capacity; ++i) {
+    const size_t pos = tail_start + i;
+    cell_t *cell = &q->buffer[pos & q->buffer_mask];
+    cell->data = (void *)(uintptr_t)(i + 1u);
+    atomic_store_explicit(&cell->sequence, pos + 1u, memory_order_relaxed);
+  }
+}
+
+static bool test_near_wrap_counters_avoid_signed_arithmetic(void) {
+  mpmc_queue_t *q = mpmc_init(TEST_QUEUE_SIZE);
+  ASSERT_TRUE(q != NULL);
+
+  const size_t near_wrap_tail = SIZE_MAX - 3u;
+  seed_full_queue_state(q, near_wrap_tail);
+
+  ASSERT_FALSE(mpmc_enqueue(q, (void *)(uintptr_t)999u));
+  ASSERT_EQ_U64(mpmc_size(q), TEST_QUEUE_SIZE);
+
+  void *out = NULL;
+  ASSERT_TRUE(mpmc_dequeue(q, &out));
+  ASSERT_PTR_EQ(out, (void *)(uintptr_t)1u);
+  ASSERT_EQ_U64(mpmc_size(q), TEST_QUEUE_SIZE - 1u);
+
+  ASSERT_TRUE(mpmc_enqueue(q, (void *)(uintptr_t)999u));
+  ASSERT_EQ_U64(mpmc_size(q), TEST_QUEUE_SIZE);
+
+  for (uintptr_t i = 2u; i <= TEST_QUEUE_SIZE; ++i) {
+    out = NULL;
+    ASSERT_TRUE(mpmc_dequeue(q, &out));
+    ASSERT_PTR_EQ(out, (void *)i);
+  }
+
+  out = NULL;
+  ASSERT_TRUE(mpmc_dequeue(q, &out));
+  ASSERT_PTR_EQ(out, (void *)(uintptr_t)999u);
+  ASSERT_EQ_U64(mpmc_size(q), 0u);
+
+  out = (void *)0x1;
+  ASSERT_FALSE(mpmc_dequeue(q, &out));
+  ASSERT_PTR_EQ(out, NULL);
+
+  mpmc_free(q);
+  return true;
+}
+
 typedef struct {
   mpmc_queue_t *q;
   size_t thread_id;
@@ -377,6 +430,8 @@ int main(void) {
       {"enqueue bulk partial on full", test_enqueue_bulk_partial_on_full},
       {"dequeue bulk partial on empty", test_dequeue_bulk_partial_on_empty},
       {"bulk zero count is noop", test_bulk_zero_count_is_noop},
+      {"near wrap counters avoid signed arithmetic",
+       test_near_wrap_counters_avoid_signed_arithmetic},
       {"concurrent smoke", test_concurrent_smoke},
   };
 
