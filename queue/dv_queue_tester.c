@@ -22,6 +22,11 @@ static atomic_size_t g_produced_count = 0;
 static atomic_size_t g_consumed_count = 0;
 static atomic_bool g_producers_done = false;
 
+typedef struct {
+  mpmc_queue_t *queue;
+  size_t *count_slot;
+} consumer_thread_args_t;
+
 static void fail_pthread(int err, const char *what) {
   if (err == 0)
     return;
@@ -122,7 +127,9 @@ static void *producer_thread(void *arg) {
 }
 
 static void *consumer_thread(void *arg) {
-  (void)arg;
+  const consumer_thread_args_t *const thread_args =
+      (const consumer_thread_args_t *)arg;
+  mpmc_queue_t *const queue = thread_args->queue;
 
   uint64_t local_sum = 0u;
   uint64_t local_xor = 0u;
@@ -133,7 +140,7 @@ static void *consumer_thread(void *arg) {
       ((size_t)THREAD_COUNT / 2u) * (size_t)ITEMS_PER_THREAD;
 
   for (;;) {
-    const size_t n = mpmc_dequeue_bulk(g_queue, batch, BATCH_SIZE);
+    const size_t n = mpmc_dequeue_bulk(queue, batch, BATCH_SIZE);
 
     if (n > 0u) {
       for (size_t i = 0u; i < n; ++i) {
@@ -153,7 +160,7 @@ static void *consumer_thread(void *arg) {
 
     if (done && consumed >= expected_total) {
       void *single = NULL;
-      if (!mpmc_dequeue(g_queue, &single))
+      if (!mpmc_dequeue(queue, &single))
         break;
 
       const uint64_t value = (uint64_t)(uintptr_t)single;
@@ -167,9 +174,10 @@ static void *consumer_thread(void *arg) {
     dv_cpu_relax();
   }
 
+  *thread_args->count_slot = local_count;
   atomic_fetch_add_explicit(&g_consumer_sum, local_sum, memory_order_relaxed);
   atomic_fetch_xor_explicit(&g_consumer_xor, local_xor, memory_order_relaxed);
-  return (void *)(uintptr_t)local_count;
+  return NULL;
 }
 
 int main(void) {
@@ -204,13 +212,19 @@ int main(void) {
 
   pthread_t prod[THREAD_COUNT / 2u];
   pthread_t cons[THREAD_COUNT / 2u];
+  size_t consumer_counts[THREAD_COUNT / 2u] = {0u};
+  consumer_thread_args_t consumer_args[THREAD_COUNT / 2u];
 
   printf("Spawning %zu producers and %zu consumers...\n", producer_threads,
          consumer_threads);
 
   for (size_t i = 0u; i < consumer_threads; ++i) {
+    consumer_args[i] = (consumer_thread_args_t){
+        .queue = g_queue,
+        .count_slot = &consumer_counts[i],
+    };
     const int err =
-        pthread_create(&cons[i], NULL, consumer_thread, (void *)(uintptr_t)i);
+        pthread_create(&cons[i], NULL, consumer_thread, &consumer_args[i]);
     fail_pthread(err, "pthread_create(consumer)");
   }
 
@@ -244,10 +258,9 @@ int main(void) {
 
   size_t joined_consumer_items = 0u;
   for (size_t i = 0u; i < consumer_threads; ++i) {
-    void *ret = NULL;
-    const int err = pthread_join(cons[i], &ret);
+    const int err = pthread_join(cons[i], NULL);
     fail_pthread(err, "pthread_join(consumer)");
-    joined_consumer_items += (size_t)(uintptr_t)ret;
+    joined_consumer_items += consumer_counts[i];
   }
 
   const uint64_t producer_sum =
