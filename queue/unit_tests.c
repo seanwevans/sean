@@ -266,7 +266,7 @@ static void *smoke_producer(void *arg) {
         ((uint64_t)a->thread_id * (uint64_t)SMOKE_ITEMS_PER_THREAD) + i + 1u;
 
     while (!mpmc_enqueue(a->q, (void *)(uintptr_t)value))
-      cpu_relax();
+      dv_cpu_relax();
 
     local_sum += value;
     atomic_fetch_add_explicit(&smoke_prod_count, 1u, memory_order_relaxed);
@@ -296,7 +296,7 @@ static void *smoke_consumer(void *arg) {
     if (done && consumed >= expected_total)
       break;
 
-    cpu_relax();
+    dv_cpu_relax();
   }
 
   atomic_fetch_add_explicit(&smoke_cons_sum, local_sum, memory_order_relaxed);
