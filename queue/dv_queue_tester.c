@@ -98,7 +98,14 @@ static void *producer_thread(void *arg) {
           ((uint64_t)thread_id * (uint64_t)ITEMS_PER_THREAD) +
           (uint64_t)current_item + 1u;
 
-      batch[batch_count++] = (void *)(uintptr_t)value;
+      uint64_t *value_obj = (uint64_t *)malloc(sizeof(*value_obj));
+      if (!value_obj) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+      }
+      *value_obj = value;
+
+      batch[batch_count++] = value_obj;
       local_sum += value;
       local_xor ^= value;
       ++current_item;
@@ -144,9 +151,11 @@ static void *consumer_thread(void *arg) {
 
     if (n > 0u) {
       for (size_t i = 0u; i < n; ++i) {
-        const uint64_t value = (uint64_t)(uintptr_t)batch[i];
+        uint64_t *value_obj = (uint64_t *)batch[i];
+        const uint64_t value = *value_obj;
         local_sum += value;
         local_xor ^= value;
+        free(value_obj);
       }
       local_count += n;
       atomic_fetch_add_explicit(&g_consumed_count, n, memory_order_relaxed);
@@ -163,9 +172,11 @@ static void *consumer_thread(void *arg) {
       if (!mpmc_dequeue(queue, &single))
         break;
 
-      const uint64_t value = (uint64_t)(uintptr_t)single;
+      uint64_t *value_obj = (uint64_t *)single;
+      const uint64_t value = *value_obj;
       local_sum += value;
       local_xor ^= value;
+      free(value_obj);
       ++local_count;
       atomic_fetch_add_explicit(&g_consumed_count, 1u, memory_order_relaxed);
       continue;
