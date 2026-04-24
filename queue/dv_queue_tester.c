@@ -111,7 +111,7 @@ static void *producer_thread(void *arg) {
       }
 
       if (sent_total < batch_count)
-        cpu_relax();
+        dv_cpu_relax();
     }
   }
 
@@ -164,7 +164,7 @@ static void *consumer_thread(void *arg) {
       continue;
     }
 
-    cpu_relax();
+    dv_cpu_relax();
   }
 
   atomic_fetch_add_explicit(&g_consumer_sum, local_sum, memory_order_relaxed);

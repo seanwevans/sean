@@ -1,0 +1,28 @@
+name: Queue Make CI
+
+on:
+  push:
+    paths:
+      - 'queue/**'
+      - '.github/workflows/queue-make-ci.yml'
+  pull_request:
+    paths:
+      - 'queue/**'
+      - '.github/workflows/queue-make-ci.yml'
+
+jobs:
+  build-queue:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build queue (debug)
+        run: make -C queue debug
+
+      - name: Build queue (release)
+        run: make -C queue release
+
+      - name: Build queue unit test target
+        run: make -C queue unit
