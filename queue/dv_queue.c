@@ -6,12 +6,14 @@ mpmc_queue_t *mpmc_init(size_t buffer_size) {
   if (buffer_size < 2u || (buffer_size & (buffer_size - 1u)) != 0u)
     return NULL;
 
+  if (buffer_size > (SIZE_MAX / 2u))
+    return NULL;
+
   size_t q_size = 0u;
   if (!dv_align_up_size(sizeof(mpmc_queue_t), DV_CACHE_LINE_SIZE, &q_size))
     return NULL;
 
-  mpmc_queue_t *q =
-      (mpmc_queue_t *)ALIGNED_ALLOC(DV_CACHE_LINE_SIZE, q_size);
+  mpmc_queue_t *q = (mpmc_queue_t *)ALIGNED_ALLOC(DV_CACHE_LINE_SIZE, q_size);
   if (!q)
     return NULL;
 
@@ -52,7 +54,8 @@ bool mpmc_enqueue(mpmc_queue_t *q, void *data) {
   if (!q)
     return false;
 
-  cell_t *cell;
+  const size_t capacity = q->buffer_mask + 1u;
+  cell_t *cell = NULL;
   size_t pos = atomic_load_explicit(&q->head, memory_order_relaxed);
 
   for (;;) {
@@ -68,7 +71,7 @@ bool mpmc_enqueue(mpmc_queue_t *q, void *data) {
         atomic_fetch_add_explicit(&q->count, 1u, memory_order_relaxed);
         return true;
       }
-    } else if ((pos - seq) <= q->buffer_mask) {
+    } else if ((pos - seq) <= capacity) {
       return false;
     } else {
       pos = atomic_load_explicit(&q->head, memory_order_relaxed);
@@ -83,7 +86,8 @@ bool mpmc_dequeue(mpmc_queue_t *q, void **data) {
 
   *data = NULL;
 
-  cell_t *cell;
+  const size_t capacity = q->buffer_mask + 1u;
+  cell_t *cell = NULL;
   size_t pos = atomic_load_explicit(&q->tail, memory_order_relaxed);
 
   for (;;) {
@@ -96,12 +100,12 @@ bool mpmc_dequeue(mpmc_queue_t *q, void **data) {
                                                 memory_order_relaxed,
                                                 memory_order_relaxed)) {
         *data = cell->data;
-        atomic_store_explicit(&cell->sequence, pos + q->buffer_mask + 1u,
+        atomic_store_explicit(&cell->sequence, pos + capacity,
                               memory_order_release);
         atomic_fetch_sub_explicit(&q->count, 1u, memory_order_relaxed);
         return true;
       }
-    } else if ((expected - seq) <= q->buffer_mask) {
+    } else if ((expected - seq) <= capacity) {
       return false;
     } else {
       pos = atomic_load_explicit(&q->tail, memory_order_relaxed);
@@ -145,6 +149,7 @@ size_t mpmc_dequeue_bulk(mpmc_queue_t *q, void **data_array, size_t count) {
 size_t mpmc_size(mpmc_queue_t *q) {
   if (!q)
     return 0u;
+
   return atomic_load_explicit(&q->count, memory_order_relaxed);
 }
 
