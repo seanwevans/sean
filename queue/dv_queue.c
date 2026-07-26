@@ -45,7 +45,6 @@ mpmc_queue_t *mpmc_init(size_t buffer_size) {
 
   atomic_store_explicit(&q->head, 0u, memory_order_relaxed);
   atomic_store_explicit(&q->tail, 0u, memory_order_relaxed);
-  atomic_store_explicit(&q->count, 0u, memory_order_relaxed);
 
   return q;
 }
@@ -68,7 +67,6 @@ bool mpmc_enqueue(mpmc_queue_t *q, void *data) {
                                                 memory_order_relaxed)) {
         cell->data = data;
         atomic_store_explicit(&cell->sequence, pos + 1u, memory_order_release);
-        atomic_fetch_add_explicit(&q->count, 1u, memory_order_relaxed);
         return true;
       }
     } else if ((pos - seq) <= capacity) {
@@ -102,7 +100,6 @@ bool mpmc_dequeue(mpmc_queue_t *q, void **data) {
         *data = cell->data;
         atomic_store_explicit(&cell->sequence, pos + capacity,
                               memory_order_release);
-        atomic_fetch_sub_explicit(&q->count, 1u, memory_order_relaxed);
         return true;
       }
     } else if ((expected - seq) <= capacity) {
@@ -150,7 +147,18 @@ size_t mpmc_size(mpmc_queue_t *q) {
   if (!q)
     return 0u;
 
-  return atomic_load_explicit(&q->count, memory_order_relaxed);
+  const size_t capacity = q->buffer_mask + 1u;
+
+  // Snapshot tail before head. Because head is monotonic non-decreasing and
+  // the invariant head >= tail always holds, sampling tail first guarantees
+  // the later-sampled head is >= the sampled tail, so head - tail never
+  // underflows. tail may advance between the two loads, which can make the
+  // difference overshoot capacity transiently; clamp that to capacity.
+  const size_t tail = atomic_load_explicit(&q->tail, memory_order_acquire);
+  const size_t head = atomic_load_explicit(&q->head, memory_order_acquire);
+  const size_t size = head - tail;
+
+  return size > capacity ? capacity : size;
 }
 
 void mpmc_free(mpmc_queue_t *q) {

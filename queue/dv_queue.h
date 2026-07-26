@@ -99,7 +99,6 @@ typedef struct {
 
   alignas(DV_CACHE_LINE_SIZE) atomic_size_t head;
   alignas(DV_CACHE_LINE_SIZE) atomic_size_t tail;
-  alignas(DV_CACHE_LINE_SIZE) atomic_size_t count;
 } mpmc_queue_t;
 
 mpmc_queue_t *mpmc_init(size_t buffer_size);

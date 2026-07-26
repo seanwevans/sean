@@ -284,7 +284,6 @@ static void seed_full_queue_state(mpmc_queue_t *q, size_t tail_start) {
 
   atomic_store_explicit(&q->tail, tail_start, memory_order_relaxed);
   atomic_store_explicit(&q->head, head_start, memory_order_relaxed);
-  atomic_store_explicit(&q->count, capacity, memory_order_relaxed);
 
   for (size_t i = 0u; i < capacity; ++i) {
     const size_t pos = tail_start + i;
@@ -459,6 +458,88 @@ static bool test_concurrent_smoke(void) {
   return true;
 }
 
+typedef struct {
+  mpmc_queue_t *q;
+  size_t capacity;
+  atomic_bool *stop;
+  atomic_size_t *over_capacity;
+  atomic_size_t *max_seen;
+} size_probe_arg_t;
+
+static void *size_probe_producer(void *arg) {
+  size_probe_arg_t *a = (size_probe_arg_t *)arg;
+  uintptr_t v = 1u;
+  while (!atomic_load_explicit(a->stop, memory_order_relaxed)) {
+    if (mpmc_enqueue(a->q, (void *)v))
+      ++v;
+  }
+  return NULL;
+}
+
+static void *size_probe_consumer(void *arg) {
+  size_probe_arg_t *a = (size_probe_arg_t *)arg;
+  void *out = NULL;
+  while (!atomic_load_explicit(a->stop, memory_order_relaxed))
+    (void)mpmc_dequeue(a->q, &out);
+  return NULL;
+}
+
+static void *size_probe_monitor(void *arg) {
+  size_probe_arg_t *a = (size_probe_arg_t *)arg;
+  while (!atomic_load_explicit(a->stop, memory_order_relaxed)) {
+    const size_t s = mpmc_size(a->q);
+    size_t prev = atomic_load_explicit(a->max_seen, memory_order_relaxed);
+    while (s > prev && !atomic_compare_exchange_weak_explicit(
+                           a->max_seen, &prev, s, memory_order_relaxed,
+                           memory_order_relaxed)) {
+    }
+    if (s > a->capacity)
+      atomic_fetch_add_explicit(a->over_capacity, 1u, memory_order_relaxed);
+  }
+  return NULL;
+}
+
+// Regression test: mpmc_size() must always report a value in [0, capacity].
+// A prior implementation tracked a separate atomic counter that was updated
+// after the slot was published, letting a consumer's decrement be observed
+// before the producer's paired increment and wrapping the unsigned size to
+// SIZE_MAX.
+static bool test_concurrent_size_stays_bounded(void) {
+  const size_t capacity = 8u;
+  mpmc_queue_t *q = mpmc_init(capacity);
+  ASSERT_TRUE(q != NULL);
+
+  atomic_bool stop = false;
+  atomic_size_t over_capacity = 0;
+  atomic_size_t max_seen = 0;
+  size_probe_arg_t arg = {
+      .q = q,
+      .capacity = capacity,
+      .stop = &stop,
+      .over_capacity = &over_capacity,
+      .max_seen = &max_seen,
+  };
+
+  pthread_t p, c, m;
+  ASSERT_EQ_U64(pthread_create(&p, NULL, size_probe_producer, &arg), 0);
+  ASSERT_EQ_U64(pthread_create(&c, NULL, size_probe_consumer, &arg), 0);
+  ASSERT_EQ_U64(pthread_create(&m, NULL, size_probe_monitor, &arg), 0);
+
+  struct timespec ts = {.tv_sec = 0, .tv_nsec = 300000000L}; // 300 ms
+  nanosleep(&ts, NULL);
+  atomic_store_explicit(&stop, true, memory_order_relaxed);
+
+  ASSERT_EQ_U64(pthread_join(p, NULL), 0);
+  ASSERT_EQ_U64(pthread_join(c, NULL), 0);
+  ASSERT_EQ_U64(pthread_join(m, NULL), 0);
+
+  ASSERT_EQ_U64(atomic_load_explicit(&over_capacity, memory_order_relaxed), 0u);
+  ASSERT_TRUE(atomic_load_explicit(&max_seen, memory_order_relaxed) <= capacity);
+
+  mpmc_free(q);
+  return true;
+}
+
 int main(void) {
   const test_case_t tests[] = {
       {"init rejects bad sizes", test_init_rejects_bad_sizes},
@@ -473,6 +554,7 @@ int main(void) {
       {"near wrap counters avoid signed arithmetic",
        test_near_wrap_counters_avoid_signed_arithmetic},
       {"concurrent smoke", test_concurrent_smoke},
+      {"concurrent size stays bounded", test_concurrent_size_stays_bounded},
   };
 
   const size_t ntests = sizeof(tests) / sizeof(tests[0]);
