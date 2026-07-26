@@ -7,6 +7,13 @@ THREADS    ?= 8
 ITEMS      ?= 10000000
 QSIZE      ?= 65536
 
+# Architecture tuning for optimized builds. Defaults to the host CPU, which
+# produces the fastest binaries but ties them to the building machine and can
+# fault (SIGILL) if run elsewhere. Override for portable builds, e.g.
+#   make release ARCHFLAGS=            (generic baseline)
+#   make release ARCHFLAGS="-march=x86-64-v2"
+ARCHFLAGS ?= -march=native -mtune=native
+
 CPPFLAGS := -DTHREAD_COUNT=$(THREADS) \
             -DITEMS_PER_THREAD=$(ITEMS) \
             -DQUEUE_SIZE=$(QSIZE) \
@@ -18,7 +25,7 @@ WARNFLAGS := -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
 COMMON_CFLAGS   := -std=c2x -pthread -MMD -MP
 COMMON_LDFLAGS  := -pthread
 
-RELEASE_CFLAGS  := $(COMMON_CFLAGS) $(WARNFLAGS) -O3 -march=native -mtune=native -DNDEBUG
+RELEASE_CFLAGS  := $(COMMON_CFLAGS) $(WARNFLAGS) -O3 $(ARCHFLAGS) -DNDEBUG
 RELEASE_LDFLAGS := $(COMMON_LDFLAGS)
 
 DEBUG_CFLAGS    := $(COMMON_CFLAGS) $(WARNFLAGS) -g3 -O0
@@ -64,8 +71,8 @@ RIGTORP_INC      ?= third_party/rigtorp
 ATOMIC_QUEUE_INC ?= third_party/atomic_queue/include
 
 BENCH_CPPFLAGS := $(CPPFLAGS) -I. -I$(RIGTORP_INC) -I$(ATOMIC_QUEUE_INC)
-BENCH_CFLAGS   := -std=c2x -pthread -MMD -MP $(WARNFLAGS) -O3 -march=native -mtune=native -DNDEBUG
-BENCH_CXXFLAGS := -pthread -MMD -MP -O3 -DNDEBUG -march=native -mtune=native -std=c++17 -Wall -Wextra
+BENCH_CFLAGS   := -std=c2x -pthread -MMD -MP $(WARNFLAGS) -O3 $(ARCHFLAGS) -DNDEBUG
+BENCH_CXXFLAGS := -pthread -MMD -MP -O3 -DNDEBUG $(ARCHFLAGS) -std=c++17 -Wall -Wextra
 BENCH_LDFLAGS  := -pthread
 
 .PHONY: all debug release tsan ubsan asan clean \
