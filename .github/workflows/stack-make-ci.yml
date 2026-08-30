@@ -1,0 +1,63 @@
+name: Stack Make CI
+
+on:
+  push:
+    paths:
+      - 'stack/**'
+      - '.github/workflows/stack-make-ci.yml'
+  pull_request:
+    paths:
+      - 'stack/**'
+      - '.github/workflows/stack-make-ci.yml'
+
+jobs:
+  build-stack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build stack (debug)
+        run: make -C stack debug
+
+      - name: Run unit tests
+        run: make -C stack run-unit
+
+      - name: Run soak harness
+        run: make -C stack run
+
+      # release cleans first, so the optimized build is checked on its own.
+      - name: Build and run stack (release)
+        run: make -C stack run-release ARCHFLAGS=
+
+      - name: Build benchmarks
+        run: make -C stack bench ARCHFLAGS=
+
+  sanitizer-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [tsan, ubsan, asan]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run stack tests with ${{ matrix.sanitizer }}
+        run: make -C stack run-${{ matrix.sanitizer }}
+
+  cache-line-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cache_size: [32, 64, 128]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run unit tests with CACHE_SIZE=${{ matrix.cache_size }}
+        run: make -C stack run-unit CACHE_SIZE=${{ matrix.cache_size }}
