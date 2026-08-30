@@ -13,6 +13,14 @@ It is heavily validated through aggressive multi-threaded smoke tests, TSAN/ASAN
 Design document: [`graph/DESIGN.md`](graph/DESIGN.md)
 
 ## Heap
+An array-backed binary heap for priority scheduling and top-k workloads.
+Push and pop are iterative sift loops that carry one element through a travelling hole, so a sift of depth `d` costs `d + 1` element moves rather than the `3d` a swap loop would; the scratch slot the carried element occupies is allocated as part of the buffer, so no operation allocates once the heap has room.
+Ordering is configured rather than hard-coded: built-in key types read a scalar at a fixed offset -- optionally through the pointer stored in the slot, for heaps of pointers to objects -- and are compared inline, with a comparator callback available for orderings the built-ins cannot express.
+That split exists because comparison is the hot path, and on this machine the inline key beats the equivalent callback by roughly a quarter on the same data.
+Min and max order, fixed and growable capacity, Floyd's O(n) bottom-up construction, `replace_top` for bounded top-k, and `update_at` / `remove_at` for reprioritizing and cancelling work already queued.
+Keyed updates need an element's current index, which the optional `on_move` hook supplies by reporting every element that comes to rest -- an index map with no allocation and no internal table.
+Validation covers a randomized differential test that mirrors every push, pop, update and removal onto a reference model and re-checks the heap-order property after each one, a scheduling soak with several hundred thousand operations, an accounting allocator that fails a run on a single unreturned byte, TSAN/UBSAN/ASAN matrices, and a benchmark that measures the design decisions -- bottom-up build against repeated pushes, and the inline key against the callback.
+
 Design document: [`heap/DESIGN.md`](heap/DESIGN.md)
 
 ## Stack
