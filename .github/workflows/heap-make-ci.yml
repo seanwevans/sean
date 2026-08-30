@@ -1,0 +1,63 @@
+name: Heap Make CI
+
+on:
+  push:
+    paths:
+      - 'heap/**'
+      - '.github/workflows/heap-make-ci.yml'
+  pull_request:
+    paths:
+      - 'heap/**'
+      - '.github/workflows/heap-make-ci.yml'
+
+jobs:
+  build-heap:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build heap (debug)
+        run: make -C heap debug
+
+      - name: Run unit tests
+        run: make -C heap run-unit
+
+      - name: Run soak harness
+        run: make -C heap run
+
+      # release cleans first, so the optimized build is checked on its own.
+      - name: Build and run heap (release)
+        run: make -C heap run-release ARCHFLAGS=
+
+      - name: Build benchmarks
+        run: make -C heap bench ARCHFLAGS=
+
+  sanitizer-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [tsan, ubsan, asan]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run heap tests with ${{ matrix.sanitizer }}
+        run: make -C heap run-${{ matrix.sanitizer }}
+
+  cache-line-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cache_size: [32, 64, 128]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run unit tests with CACHE_SIZE=${{ matrix.cache_size }}
+        run: make -C heap run-unit CACHE_SIZE=${{ matrix.cache_size }}
