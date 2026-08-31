@@ -10,6 +10,14 @@ The implementation includes support for bulk enqueue and dequeue operations to m
 It is heavily validated through aggressive multi-threaded smoke tests, TSAN/ASAN sanitizers, and a C++ benchmark matrix that evaluates its operations-per-second directly against standard implementations like `rigtorp` and `atomic_queue`.
 
 ## Graph
+An adjacency-list graph for topology that keeps changing while it is being read.
+One edge record is threaded on two doubly linked lists at once -- the source's outgoing list and the destination's incoming list -- so an undirected edge is stored once rather than as two half-edges, removing an edge is O(1) instead of a walk of the list it sits on, and removing a vertex costs one unlink per incident edge instead of a scan of the edge pool.
+On this machine that shows up as removal through a handle running about three times the rate of removal by endpoints, which is the same unlink reached by a search.
+Vertices and edges are generation-tagged indices into two pools, so a handle kept across the removal of what it named is rejected rather than addressing whatever was recycled into the slot.
+Both pools are a high-water mark over a free list, which makes growth a resize with no free-list rebuild and gives fixed capacity a guarantee worth having: a fixed graph, its traversal scratch included, reaches for the allocator exactly zero times after `init`.
+Directed and undirected modes; optional weights in an array parallel to the edge pool, so a traversal that reads none of them pulls only topology into cache; opt-in rejection of parallel edges and self-loops; breadth- and depth-first walks over scratch the graph owns and reuses; and adjacency iterators that stop at a mutation instead of walking a torn list.
+Validation covers randomized differential runs against a reference model in both graph modes, a soak harness that churns mutations against a running degree model and checks traversals over shapes whose answers are known in advance, an accounting allocator that fails a run on a single unreturned byte, TSAN/UBSAN/ASAN matrices, and a benchmark that measures the design decisions -- batched edge insertion against one at a time, and removal by handle against removal by endpoints.
+
 Design document: [`graph/DESIGN.md`](graph/DESIGN.md)
 
 ## Heap

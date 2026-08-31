@@ -1,0 +1,63 @@
+name: Graph Make CI
+
+on:
+  push:
+    paths:
+      - 'graph/**'
+      - '.github/workflows/graph-make-ci.yml'
+  pull_request:
+    paths:
+      - 'graph/**'
+      - '.github/workflows/graph-make-ci.yml'
+
+jobs:
+  build-graph:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build graph (debug)
+        run: make -C graph debug
+
+      - name: Run unit tests
+        run: make -C graph run-unit
+
+      - name: Run soak harness
+        run: make -C graph run
+
+      # release cleans first, so the optimized build is checked on its own.
+      - name: Build and run graph (release)
+        run: make -C graph run-release ARCHFLAGS=
+
+      - name: Build benchmarks
+        run: make -C graph bench ARCHFLAGS=
+
+  sanitizer-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [tsan, ubsan, asan]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run graph tests with ${{ matrix.sanitizer }}
+        run: make -C graph run-${{ matrix.sanitizer }}
+
+  cache-line-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cache_size: [32, 64, 128]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run unit tests with CACHE_SIZE=${{ matrix.cache_size }}
+        run: make -C graph run-unit CACHE_SIZE=${{ matrix.cache_size }}
